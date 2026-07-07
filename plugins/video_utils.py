@@ -1,4 +1,5 @@
 import os
+import time
 import asyncio
 import logging
 from typing import Optional, Dict
@@ -23,9 +24,12 @@ class VideoConverter:
             logger.error(f"Input file not found: {input_path}")
             return None
         
-        # Generate output path
+        # Generate output path - use temp file to avoid ffmpeg "same as input" error
         base_name = os.path.splitext(os.path.basename(input_path))[0]
-        output_path = os.path.join(os.path.dirname(input_path), f"{base_name}.{output_format}")
+        output_path = os.path.join(os.path.dirname(input_path), f"{base_name}_converted_{int(time.time())}.{output_format}")
+        # If same as input, add suffix
+        if output_path == input_path:
+            output_path = os.path.join(os.path.dirname(input_path), f"{base_name}_converted.{output_format}")
         
         # Quality presets
         quality_presets = {
