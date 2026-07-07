@@ -77,27 +77,82 @@ async def language_command(client: Client, message: Message):
 @Client.on_message(filters.command("queue"))
 async def queue_command(client: Client, message: Message):
     stats = download_queue.get_stats()
-    text = "📋 **Download Queue**\n\n"
-    text += f"⏳ Queued: {stats['queued']}\n"
-    text += f"⬇️ Active: {stats['active']}\n"
-    text += f"✅ Completed: {stats['completed']}\n\n"
+    
+    text = (
+        f"📋 **Download Queue**\n\n"
+        f"⏳ **Queued:** {stats['queued']}\n"
+        f"⬇️ **Active:** {stats['active']}\n"
+        f"✅ **Completed:** {stats['completed']}\n\n"
+    )
+    
     if download_queue.active:
-        text += "**Active Downloads:**\n"
+        text += "**Active Downloads:**\n\n"
+        i = 1
         for task_id, task in list(download_queue.active.items())[:5]:
-            fname = getattr(task, 'filename', None) or getattr(task, 'url', 'Unknown')[:40]
+            fname = getattr(task, 'filename', None) or getattr(task, 'url', 'Unknown')[:35]
             prog = getattr(task, 'progress', 0)
             spd = getattr(task, 'speed', 0)
-            text += f"• {fname}\n  Progress: {prog:.1f}% | Speed: {spd/1024/1024:.2f} MB/s\n\n"
+            status = getattr(task, 'status', 'active')
+            text += f"{i}. **{fname}**\n"
+            text += f"   📊 {prog:.1f}% | ⚡ {spd/1024/1024:.2f} MB/s | {status}\n\n"
+            i += 1
+    else:
+        text += "ℹ️ No active downloads.\n"
+        text += "Send a link to start downloading!\n"
+    
+    if download_queue.queue:
+        text += f"💡 {len(download_queue.queue)} tasks waiting in queue...\n"
+    
     await message.reply_text(text)
 
 
 # ======================= QUOTA =======================
 @Client.on_message(filters.command("quota"))
 async def quota_command(client: Client, message: Message):
-    quota = quota_manager.get_user_quota(message.from_user.id)
-    text = "📊 **Your Daily Quota**\n\n"
-    text += f"📥 Downloads Today: {quota.get('daily_downloads', 0)}\n"
-    text += f"💾 Data Used: {quota.get('daily_size', 0) / 1024 / 1024:.2f} MB\n"
+    user_id = message.from_user.id
+    from plugins.premium import get_user_limits
+    
+    quota = quota_manager.get_user_quota(user_id)
+    limits = get_user_limits(user_id)
+    
+    # Calculate remaining
+    remaining_downloads = limits['daily_downloads'] - quota.get('daily_downloads', 0)
+    if limits['daily_downloads'] == -1:
+        remaining_downloads_str = "Unlimited"
+        dl_limit_str = "∞"
+    else:
+        remaining_downloads_str = str(remaining_downloads)
+        dl_limit_str = str(limits['daily_downloads'])
+    
+    daily_size_mb = limits['daily_size'] / (1024 * 1024) if limits['daily_size'] > 0 else float('inf')
+    used_mb = quota.get('daily_size', 0) / (1024 * 1024)
+    remaining_mb = max(0, daily_size_mb - used_mb)
+    
+    if limits['daily_size'] == -1:
+        size_limit_str = "∞"
+        remaining_size_str = "∞"
+    else:
+        size_limit_str = f"{daily_size_mb:.0f} MB"
+        remaining_size_str = f"{remaining_mb:.0f} MB"
+    
+    # User type
+    if user_id == BIMBO_OWNER_ID:
+        user_type = "👑 Owner"
+    elif premium_manager.is_premium(user_id):
+        user_type = "⭐ Premium"
+    else:
+        user_type = "👤 Free User"
+    
+    text = (
+        f"📊 **Daily Quota**\n\n"
+        f"{user_type}\n\n"
+        f"📥 **Downloads:**\n"
+        f"├ Used: {quota.get('daily_downloads', 0)} / {dl_limit_str}\n"
+        f"└ Remaining: {remaining_downloads_str}\n\n"
+        f"💾 **Data:**\n"
+        f"├ Used: {used_mb:.2f} MB / {size_limit_str}\n"
+        f"└ Remaining: {remaining_size_str}\n"
+    )
     await message.reply_text(text)
 
 
@@ -300,3 +355,20 @@ async def premium_list_command(client: Client, message: Message):
     if len(text) > 4000:
         text = text[:4000] + "\n\n...truncated"
     await message.reply_text(text)
+
+# ======================= CALLBACK HANDLERS (for language & close buttons) =======================
+@Client.on_callback_query(filters.regex(r"^set_lang_"))
+async def language_callback(client: Client, callback_query):
+    lang_code = callback_query.data.replace("set_lang_", "")
+    user_id = callback_query.from_user.id
+    if lang_code in LANGUAGES:
+        set_language(user_id, lang_code)
+        await callback_query.answer(f"✅ Language changed to {LANGUAGES[lang_code]}!", show_alert=True)
+        await callback_query.message.edit_text(f"✅ **Language set to {LANGUAGES[lang_code]}**")
+    else:
+        await callback_query.answer("❌ Invalid language!", show_alert=True)
+
+@Client.on_callback_query(filters.regex(r"^close$"))
+async def close_callback(client: Client, callback_query):
+    await callback_query.message.delete()
+    await callback_query.answer("Closed!")
