@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Optional
 import json
 import os
+from config import BIMBO_OWNER_ID
 
 # Premium limits
 FREE_LIMITS = {
@@ -178,6 +179,8 @@ premium_manager = PremiumManager()
 
 def is_premium_user(user_id: int) -> bool:
     """Check if user is premium"""
+    if user_id == BIMBO_OWNER_ID:
+        return True
     return premium_manager.is_premium(user_id)
 
 def get_user_tier(user_id: int) -> str:
@@ -186,6 +189,9 @@ def get_user_tier(user_id: int) -> str:
 
 def get_user_limits(user_id: int) -> Dict:
     """Get user's limits based on tier"""
+    if user_id == BIMBO_OWNER_ID:
+        return VIP_LIMITS
+    
     tier = get_user_tier(user_id)
     
     if tier == 'vip':
@@ -209,9 +215,13 @@ def extend_premium(user_id: int, days: int = 30):
 
 def get_premium_info(user_id: int) -> Optional[Dict]:
     """Get premium info"""
+    if user_id == BIMBO_OWNER_ID:
+        return {'tier': 'vip', 'expired': False, 'expiry': 'Lifetime', 'days_remaining': -1}
     return premium_manager.get_premium_info(user_id)
 
 def check_feature_access(user_id: int, feature: str) -> bool:
     """Check if user has access to a feature"""
+    if user_id == BIMBO_OWNER_ID:
+        return True
     limits = get_user_limits(user_id)
     return limits.get(feature, False)
