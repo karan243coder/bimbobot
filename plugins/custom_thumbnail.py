@@ -246,3 +246,55 @@ async def get_flocation(download_directory, extension):
             continue
 
     return 0, download_directory
+
+async def add_watermark(file_path: str, watermark_text: str) -> str:
+    """
+    Add text watermark to the file (image/video thumbnail)
+    Uses ffmpeg to add watermark text overlay.
+    """
+    import subprocess as sp
+    
+    if not watermark_text or not file_path:
+        return file_path
+    
+    try:
+        # For images - use PIL
+        if file_path.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
+            with Image.open(file_path) as img:
+                from PIL import ImageDraw, ImageFont
+                img_rgba = img.convert("RGBA")
+                overlay = Image.new("RGBA", img_rgba.size, (255, 255, 255, 0))
+                draw = ImageDraw.Draw(overlay)
+                # Use default font
+                try:
+                    font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 30)
+                except:
+                    font = ImageFont.load_default()
+                # Position bottom-right
+                bbox = draw.textbbox((0, 0), watermark_text, font=font)
+                tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+                x = img_rgba.width - tw - 10
+                y = img_rgba.height - th - 10
+                draw.text((x, y), watermark_text, font=font, fill=(255, 255, 255, 180))
+                watermarked = Image.alpha_composite(img_rgba, overlay)
+                watermarked = watermarked.convert("RGB")
+                watermarked.save(file_path, "JPEG", quality=88)
+            return file_path
+        
+        # For videos - use ffmpeg
+        output_path = os.path.splitext(file_path)[0] + "_wm" + os.path.splitext(file_path)[1]
+        cmd = [
+            "ffmpeg", "-i", file_path,
+            "-vf", f"drawtext=text='{watermark_text}':fontcolor=white:fontsize=24:x=w-tw-10:y=h-th-10:shadowcolor=black:shadowx=2:shadowy=2",
+            "-codec:a", "copy", "-y", output_path
+        ]
+        process = await asyncio.create_subprocess_exec(
+            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        )
+        await process.communicate()
+        if os.path.exists(output_path):
+            os.replace(output_path, file_path)
+        return file_path
+    except Exception as e:
+        logger.warning(f"add_watermark error: {e}")
+        return file_path
