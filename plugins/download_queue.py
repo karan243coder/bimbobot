@@ -211,6 +211,10 @@ class DownloadQueue:
                 if task.task_id in self.active:
                     del self.active[task.task_id]
     
+    def get_active_downloads(self) -> Dict:
+        """Get active downloads"""
+        return self.active.copy()
+
     def get_stats(self) -> Dict:
         """Get queue statistics"""
         return {
