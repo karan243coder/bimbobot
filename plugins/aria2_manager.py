@@ -13,26 +13,45 @@ class Aria2Manager:
         self.secret = getattr(Config, 'ARIA2_SECRET', '')
         self.server = None
         self.connected = False
+        self._reconnect_count = 0
+        self._max_reconnect = 10
         
     async def connect(self):
-        """Connect to Aria2 RPC server"""
+        """Connect to Aria2 RPC server with retry"""
+        for attempt in range(5):
+            try:
+                self.server = xmlrpc.client.ServerProxy(self.uri, allow_none=True)
+                # Test connection
+                version = self.server.aria2.getVersion(self.secret)
+                self.connected = True
+                self._reconnect_count = 0
+                logger.info(f"✅ Aria2 connected! Version: {version.get('version', 'unknown')}")
+                return True
+            except Exception as e:
+                self.connected = False
+                if attempt < 4:
+                    wait = 2 * (attempt + 1)
+                    logger.warning(f"⏳ Aria2 connect attempt {attempt+1}/5 failed, retrying in {wait}s...")
+                    await asyncio.sleep(wait)
+                else:
+                    logger.error(f"❌ Aria2 connection failed after 5 attempts: {e}")
+                    return False
+    
+    async def ensure_connected(self):
+        """Ensure connection, reconnect if needed"""
+        if not self.connected:
+            return await self.connect()
         try:
-            self.server = xmlrpc.client.ServerProxy(self.uri, allow_none=True)
-            # Test connection
             self.server.aria2.getVersion(self.secret)
-            self.connected = True
-            logger.info("Aria2 connected successfully")
             return True
-        except Exception as e:
-            logger.error(f"Aria2 connection failed: {e}")
+        except:
             self.connected = False
-            return False
+            return await self.connect()
     
     async def add_download(self, url, download_dir, filename=None, headers=None):
         """Add download to Aria2"""
-        if not self.connected:
-            if not await self.connect():
-                return None
+        if not await self.ensure_connected():
+            return None
         
         try:
             options = {
@@ -54,18 +73,18 @@ class Aria2Manager:
             if headers:
                 options['header'] = headers
             
-            # Add download
             gid = self.server.aria2.addUri(self.secret, [url], options)
-            logger.info(f"Aria2 download added: {gid}")
+            logger.info(f"✅ Aria2 download added: {gid}")
             return gid
             
         except Exception as e:
-            logger.error(f"Aria2 add download error: {e}")
+            logger.error(f"❌ Aria2 add download error: {e}")
+            self.connected = False
             return None
     
     async def get_status(self, gid):
         """Get download status"""
-        if not self.connected:
+        if not await self.ensure_connected():
             return None
         
         try:
@@ -77,52 +96,50 @@ class Aria2Manager:
             )
             return status
         except Exception as e:
-            logger.error(f"Aria2 get status error: {e}")
+            logger.error(f"❌ Aria2 get status error: {e}")
+            self.connected = False
             return None
     
     async def pause_download(self, gid):
         """Pause download"""
-        if not self.connected:
+        if not await self.ensure_connected():
             return False
-        
         try:
             self.server.aria2.pause(self.secret, gid)
             return True
-        except Exception as e:
-            logger.error(f"Aria2 pause error: {e}")
+        except:
+            self.connected = False
             return False
     
     async def resume_download(self, gid):
         """Resume download"""
-        if not self.connected:
+        if not await self.ensure_connected():
             return False
-        
         try:
             self.server.aria2.unpause(self.secret, gid)
             return True
-        except Exception as e:
-            logger.error(f"Aria2 resume error: {e}")
+        except:
+            self.connected = False
             return False
     
     async def remove_download(self, gid, force=False):
         """Remove download"""
-        if not self.connected:
+        if not await self.ensure_connected():
             return False
-        
         try:
             if force:
                 self.server.aria2.forceRemove(self.secret, gid)
             else:
                 self.server.aria2.remove(self.secret, gid)
             return True
-        except Exception as e:
-            logger.error(f"Aria2 remove error: {e}")
+        except:
+            self.connected = False
             return False
     
     async def get_all_downloads(self):
         """Get all active downloads"""
-        if not self.connected:
-            return []
+        if not await self.ensure_connected():
+            return {'active': [], 'waiting': [], 'stopped': []}
         
         try:
             active = self.server.aria2.tellActive(self.secret)
@@ -134,27 +151,23 @@ class Aria2Manager:
                 'waiting': waiting,
                 'stopped': stopped
             }
-        except Exception as e:
-            logger.error(f"Aria2 get all error: {e}")
+        except:
+            self.connected = False
             return {'active': [], 'waiting': [], 'stopped': []}
     
     async def get_global_status(self):
         """Get global Aria2 status"""
-        if not self.connected:
+        if not await self.ensure_connected():
             return None
-        
         try:
-            status = self.server.aria2.getGlobalStat(self.secret)
-            return status
-        except Exception as e:
-            logger.error(f"Aria2 global status error: {e}")
+            return self.server.aria2.getGlobalStat(self.secret)
+        except:
+            self.connected = False
             return None
     
     def format_status(self, status):
-        """Format status for display"""
         if not status:
             return "Unknown"
-        
         status_map = {
             'active': '⬇️ Downloading',
             'paused': '⏸️ Paused',
@@ -163,8 +176,8 @@ class Aria2Manager:
             'error': '❌ Error',
             'removed': '🗑️ Removed'
         }
-        
         return status_map.get(status.get('status', ''), 'Unknown')
+
 
 # Global instance
 aria2_manager = Aria2Manager()
@@ -190,7 +203,6 @@ async def download_with_aria2(url, download_dir, filename=None, progress_callbac
             
             current_status = status.get('status', '')
             
-            # Call progress callback
             if progress_callback:
                 total = int(status.get('totalLength', 0))
                 completed = int(status.get('completedLength', 0))
@@ -204,29 +216,24 @@ async def download_with_aria2(url, download_dir, filename=None, progress_callbac
                     status=current_status
                 )
             
-            # Check if complete
             if current_status == 'complete':
-                # Get file path
                 files = status.get('files', [])
                 if files:
-                    file_path = files[0]['path']
-                    return file_path
+                    return files[0]['path']
                 break
             
-            # Check if error
             if current_status == 'error':
                 error_msg = status.get('errorMessage', 'Unknown error')
-                logger.error(f"Aria2 download error: {error_msg}")
+                logger.error(f"❌ Aria2 download error: {error_msg}")
                 return None
             
-            # Check if removed
             if current_status == 'removed':
                 return None
             
             await asyncio.sleep(1)
     
     except Exception as e:
-        logger.error(f"Aria2 download exception: {e}")
+        logger.error(f"❌ Aria2 download exception: {e}")
         await aria2_manager.remove_download(gid, force=True)
         return None
 
