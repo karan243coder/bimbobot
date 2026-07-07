@@ -136,3 +136,6 @@ def download_terabox_file(terabox_instance, file_info: Dict[str, Any], download_
     except Exception as e:
         logger.error(f"Error downloading Terabox file: {e}", exc_info=True)
         return None
+
+# Alias for compatibility with plugins/youtube_dl_echo.py
+extract = extract_terabox_info
