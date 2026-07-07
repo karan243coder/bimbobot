@@ -172,24 +172,57 @@ async def convert_command(client: Client, message: Message):
 @Client.on_message(filters.command("screenshot"))
 async def screenshot_command(client: Client, message: Message):
     if not message.reply_to_message or not message.reply_to_message.video:
-        await message.reply_text("⚠️ Reply to a video with /screenshot")
+        await message.reply_text("⚠️ Reply to a video with /screenshot [count]")
         return
     user_id = message.from_user.id
     if user_id != BIMBO_OWNER_ID and not premium_manager.is_premium(user_id):
         await message.reply_text("⭐ Premium feature! Use /premium")
         return
+
+    # Check if count specified
+    count = 1
+    if len(message.command) > 1:
+        try:
+            count = int(message.command[1])
+            if count < 1:
+                count = 1
+            if count > 10:
+                count = 10
+                await message.reply_text("⚠️ Max 10 screenshots allowed. Generating 10...")
+        except ValueError:
+            await message.reply_text("⚠️ Invalid number! Usage: /screenshot [count]")
+            return
+
     video = message.reply_to_message.video
-    m = await message.reply_text("⬇️ Downloading video...")
+    m = await message.reply_text(f"⬇️ Downloading video...")
     try:
         fp = await client.download_media(video.file_id)
-        await m.edit_text("📸 Screenshot...")
-        ss = await screenshot_generator.generate_screenshot(fp)
-        if ss:
-            await m.edit_text("⬆️ Uploading...")
-            await client.send_photo(message.chat.id, ss, caption="✅ Screenshot!")
-            await m.delete()
+
+        if count == 1:
+            await m.edit_text("📸 Generating screenshot...")
+            ss = await screenshot_generator.generate_screenshot(fp)
+            if ss:
+                await m.edit_text("⬆️ Uploading...")
+                await client.send_photo(message.chat.id, ss, caption="✅ Screenshot!")
+                await m.delete()
+            else:
+                await m.edit_text("❌ Failed to generate screenshot!")
         else:
-            await m.edit_text("❌ Failed!")
+            await m.edit_text(f"📸 Generating {count} screenshots...")
+            screenshots = await screenshot_generator.generate_multiple_screenshots(fp, count=count)
+            if screenshots:
+                await m.edit_text(f"⬆️ Uploading {len(screenshots)} screenshots...")
+                # Send as media group (album)
+                from pyrogram.types import InputMediaPhoto
+                media_group = []
+                for i, ss in enumerate(screenshots):
+                    caption_text = f"📸 Screenshot {i+1}/{len(screenshots)}" if i == 0 else ""
+                    media_group.append(InputMediaPhoto(ss, caption=caption_text))
+
+                await client.send_media_group(message.chat.id, media_group)
+                await m.delete()
+            else:
+                await m.edit_text("❌ Failed to generate screenshots!")
     except Exception as e:
         await m.edit_text(f"❌ Error: {e}")
 
