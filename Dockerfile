@@ -1,8 +1,9 @@
 FROM python:3.11-slim
 
-# Install system dependencies
+# Install system dependencies including aria2
 RUN apt-get update && apt-get install -y \
     ffmpeg \
+    aria2 \
     python3-libtorrent \
     libtorrent-rasterbar2.0 \
     && rm -rf /var/lib/apt/lists/*
@@ -25,5 +26,5 @@ RUN mkdir -p downloads
 # Koyeb health check ke liye port
 EXPOSE 8080
 
-# Run the bot
+# Run the bot (bot.py handles aria2 startup)
 CMD ["python", "-m", "bot"]
