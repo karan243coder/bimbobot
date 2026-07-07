@@ -22,8 +22,8 @@ COPY . .
 # Create download directory
 RUN mkdir -p downloads
 
-# Expose port for web server
-EXPOSE 8000
+# Koyeb health check ke liye port
+EXPOSE 8080
 
 # Run the bot
 CMD ["python", "-m", "bot"]
