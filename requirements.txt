@@ -7,6 +7,9 @@ aiohttp==3.9.1
 aiofiles==23.2.1
 requests==2.31.0
 
+# Media Metadata (required for hachoir.parser & hachoir.metadata)
+hachoir==3.3.0
+
 # Video Processing
 yt-dlp==2023.12.30
 ffmpeg-python==0.2.0
