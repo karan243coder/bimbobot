@@ -4,6 +4,7 @@ from datetime import datetime
 from pyrogram import filters, Client
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from config import BIMBO_OWNER_ID, BIMBO_DATABASE_URL
+from plugins.premium import premium_manager
 from database.access import bimbo
 import logging
 
@@ -13,7 +14,6 @@ logger = logging.getLogger(__name__)
 ADMIN_DATA_FILE = "admin_data.json"
 
 def load_admin_data():
-    """Load admin data from file"""
     try:
         if os.path.exists(ADMIN_DATA_FILE):
             with open(ADMIN_DATA_FILE, 'r') as f:
@@ -32,19 +32,16 @@ def load_admin_data():
     }
 
 def save_admin_data(data):
-    """Save admin data to file"""
     try:
         with open(ADMIN_DATA_FILE, 'w') as f:
             json.dump(data, f, indent=2)
     except Exception as e:
         logger.error(f"Save admin data error: {e}")
 
-# Load initial data
 admin_data = load_admin_data()
 
 @Client.on_message(filters.command("admin") & filters.user(BIMBO_OWNER_ID))
 async def admin_panel(client: Client, message: Message):
-    """Show admin panel"""
     buttons = InlineKeyboardMarkup([
         [
             InlineKeyboardButton("📢 Channels", callback_data="admin_channels"),
@@ -57,6 +54,10 @@ async def admin_panel(client: Client, message: Message):
         [
             InlineKeyboardButton("📢 Broadcast", callback_data="admin_broadcast"),
             InlineKeyboardButton("💾 Database", callback_data="admin_database")
+        ],
+        [
+            InlineKeyboardButton("⭐ Premium Users", callback_data="admin_premium"),
+            InlineKeyboardButton("📋 Premium List", callback_data="admin_premium_list")
         ]
     ])
     
@@ -69,7 +70,6 @@ async def admin_panel(client: Client, message: Message):
 
 @Client.on_callback_query(filters.regex("^admin_"))
 async def admin_callback(client: Client, callback_query):
-    """Handle admin panel callbacks"""
     data = callback_query.data
     
     if data == "admin_channels":
@@ -84,11 +84,14 @@ async def admin_callback(client: Client, callback_query):
         await callback_query.answer("Use /broadcast command", show_alert=True)
     elif data == "admin_database":
         await show_database(callback_query)
+    elif data == "admin_premium":
+        await show_premium_panel(callback_query)
+    elif data == "admin_premium_list":
+        await show_premium_list(callback_query)
     elif data == "admin_back":
         await show_admin_panel(callback_query)
 
 async def show_admin_panel(callback_query):
-    """Show main admin panel"""
     buttons = InlineKeyboardMarkup([
         [
             InlineKeyboardButton("📢 Channels", callback_data="admin_channels"),
@@ -101,6 +104,10 @@ async def show_admin_panel(callback_query):
         [
             InlineKeyboardButton("📢 Broadcast", callback_data="admin_broadcast"),
             InlineKeyboardButton("💾 Database", callback_data="admin_database")
+        ],
+        [
+            InlineKeyboardButton("⭐ Premium Users", callback_data="admin_premium"),
+            InlineKeyboardButton("📋 Premium List", callback_data="admin_premium_list")
         ]
     ])
     
@@ -110,10 +117,45 @@ async def show_admin_panel(callback_query):
         reply_markup=buttons
     )
 
-async def show_channels(callback_query):
-    """Show channel management"""
-    channels = admin_data.get('channels', [])
+async def show_premium_panel(callback_query):
+    text = (
+        "⭐ **Premium Management**\n\n"
+        "**Commands:**\n"
+        "• `/addpremium <user_id> <days>` - Add premium user\n"
+        "• `/removepremium <user_id>` - Remove premium user\n"
+        "• `/premiumlist` - List all premium users\n\n"
+        "**Example:**\n"
+        "`/addpremium 123456789 30` - 30 din premium\n"
+        "`/addpremium 123456789 365` - 1 saal premium"
+    )
+    buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📋 View Premium List", callback_data="admin_premium_list")],
+        [InlineKeyboardButton("◀️ Back", callback_data="admin_back")]
+    ])
+    await callback_query.message.edit_text(text, reply_markup=buttons)
+
+async def show_premium_list(callback_query):
+    all_premium = premium_manager.get_all_premium_users()
     
+    if not all_premium:
+        text = "📋 No premium users found."
+    else:
+        text = "⭐ **Premium Users List**\n\n"
+        for uid, data in all_premium.items():
+            tier = data.get('tier', 'premium')
+            expiry = data.get('expiry', 'Lifetime')
+            text += f"👤 `{uid}` | {tier} | Exp: {expiry}\n"
+        
+        if len(text) > 4000:
+            text = text[:4000] + "\n\n...(truncated)"
+    
+    buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton("◀️ Back", callback_data="admin_premium")]
+    ])
+    await callback_query.message.edit_text(text, reply_markup=buttons)
+
+async def show_channels(callback_query):
+    channels = admin_data.get('channels', [])
     text = "📢 **Channel Management**\n\n"
     
     if channels:
@@ -135,9 +177,7 @@ async def show_channels(callback_query):
     await callback_query.message.edit_text(text, reply_markup=buttons)
 
 async def show_ban_panel(callback_query):
-    """Show ban management"""
     banned = admin_data.get('banned_users', [])
-    
     text = "🚫 **Ban Management**\n\n"
     
     if banned:
@@ -161,15 +201,17 @@ async def show_ban_panel(callback_query):
     await callback_query.message.edit_text(text, reply_markup=buttons)
 
 async def show_stats(callback_query):
-    """Show statistics"""
     try:
         total_users = await bimbo.total_users_count()
     except:
         total_users = "N/A"
     
+    premium_count = len(premium_manager.get_all_premium_users())
+    
     text = (
         f"📊 **Bot Statistics**\n\n"
         f"👥 Total Users: {total_users}\n"
+        f"⭐ Premium Users: {premium_count}\n"
         f"📢 Channels: {len(admin_data.get('channels', []))}\n"
         f"🚫 Banned Users: {len(admin_data.get('banned_users', []))}\n"
         f"⚙️ Force Subscribe: {'✅ Enabled' if admin_data['settings'].get('force_sub') else '❌ Disabled'}\n"
@@ -183,9 +225,7 @@ async def show_stats(callback_query):
     await callback_query.message.edit_text(text, reply_markup=buttons)
 
 async def show_settings(callback_query):
-    """Show settings"""
     settings = admin_data.get('settings', {})
-    
     force_sub = settings.get('force_sub', False)
     maintenance = settings.get('maintenance_mode', False)
     
@@ -196,28 +236,17 @@ async def show_settings(callback_query):
     )
     
     buttons = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(
-                f"{'Disable' if force_sub else 'Enable'} Force Sub",
-                callback_data="toggle_forcesub"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                f"{'Disable' if maintenance else 'Enable'} Maintenance",
-                callback_data="toggle_maintenance"
-            )
-        ],
+        [InlineKeyboardButton(f"{'Disable' if force_sub else 'Enable'} Force Sub", callback_data="toggle_forcesub")],
+        [InlineKeyboardButton(f"{'Disable' if maintenance else 'Enable'} Maintenance", callback_data="toggle_maintenance")],
         [InlineKeyboardButton("◀️ Back", callback_data="admin_back")]
     ])
     
     await callback_query.message.edit_text(text, reply_markup=buttons)
 
 async def show_database(callback_query):
-    """Show database info"""
     text = (
         f"💾 **Database Information**\n\n"
-        f"🔗 Database URL: `{BIMBO_DATABASE_URL[:50]}...`\n"
+        f"🔗 Database URL: `{str(BIMBO_DATABASE_URL)[:50]}...`\n"
         f"📊 Status: ✅ Connected\n"
     )
     
@@ -229,7 +258,6 @@ async def show_database(callback_query):
 
 @Client.on_callback_query(filters.regex("^toggle_"))
 async def toggle_settings(client: Client, callback_query):
-    """Toggle settings"""
     data = callback_query.data
     
     if data == "toggle_forcesub":
@@ -245,18 +273,13 @@ async def toggle_settings(client: Client, callback_query):
 
 @Client.on_message(filters.command("addchannel") & filters.user(BIMBO_OWNER_ID))
 async def add_channel(client: Client, message: Message):
-    """Add a channel"""
     if len(message.command) < 3:
-        await message.reply_text(
-            "❌ **Usage:** `/addchannel <channel_id> <channel_name>`\n\n"
-            "Example: `/addchannel -1001234567890 My Channel`"
-        )
+        await message.reply_text("❌ **Usage:** `/addchannel <channel_id> <channel_name>`")
         return
     
     channel_id = message.command[1]
     channel_name = " ".join(message.command[2:])
     
-    # Add to data
     if 'channels' not in admin_data:
         admin_data['channels'] = []
     
@@ -265,95 +288,66 @@ async def add_channel(client: Client, message: Message):
         'name': channel_name,
         'added_at': datetime.now().isoformat()
     })
-    
     save_admin_data(admin_data)
     
-    await message.reply_text(
-        f"✅ **Channel Added**\n\n"
-        f"📢 Name: {channel_name}\n"
-        f"🆔 ID: `{channel_id}`"
-    )
+    await message.reply_text(f"✅ **Channel Added**\n\n📢 Name: {channel_name}\n🆔 ID: `{channel_id}`")
 
 @Client.on_message(filters.command("removechannel") & filters.user(BIMBO_OWNER_ID))
 async def remove_channel(client: Client, message: Message):
-    """Remove a channel"""
     if len(message.command) < 2:
         await message.reply_text("❌ **Usage:** `/removechannel <channel_id>`")
         return
-    
     channel_id = message.command[1]
-    
-    # Remove from data
     if 'channels' in admin_data:
         admin_data['channels'] = [c for c in admin_data['channels'] if c['id'] != channel_id]
         save_admin_data(admin_data)
-    
     await message.reply_text(f"✅ Channel `{channel_id}` removed!")
 
 @Client.on_message(filters.command("listchannels") & filters.user(BIMBO_OWNER_ID))
 async def list_channels(client: Client, message: Message):
-    """List all channels"""
     channels = admin_data.get('channels', [])
-    
     if not channels:
         await message.reply_text("📢 No channels added yet.")
         return
-    
     text = "📢 **Added Channels:**\n\n"
     for i, channel in enumerate(channels, 1):
         text += f"{i}. **{channel['name']}**\n   ID: `{channel['id']}`\n\n"
-    
     await message.reply_text(text)
 
 @Client.on_message(filters.command("ban") & filters.user(BIMBO_OWNER_ID))
 async def ban_user(client: Client, message: Message):
-    """Ban a user"""
     if len(message.command) < 2:
         await message.reply_text("❌ **Usage:** `/ban <user_id>`")
         return
-    
     user_id = int(message.command[1])
-    
     if 'banned_users' not in admin_data:
         admin_data['banned_users'] = []
-    
     if user_id not in admin_data['banned_users']:
         admin_data['banned_users'].append(user_id)
         save_admin_data(admin_data)
-    
     await message.reply_text(f"🚫 User `{user_id}` has been banned!")
 
 @Client.on_message(filters.command("unban") & filters.user(BIMBO_OWNER_ID))
 async def unban_user(client: Client, message: Message):
-    """Unban a user"""
     if len(message.command) < 2:
         await message.reply_text("❌ **Usage:** `/unban <user_id>`")
         return
-    
     user_id = int(message.command[1])
-    
     if 'banned_users' in admin_data:
         admin_data['banned_users'] = [u for u in admin_data['banned_users'] if u != user_id]
         save_admin_data(admin_data)
-    
     await message.reply_text(f"✅ User `{user_id}` has been unbanned!")
 
 @Client.on_message(filters.command("banlist") & filters.user(BIMBO_OWNER_ID))
 async def ban_list(client: Client, message: Message):
-    """List banned users"""
     banned = admin_data.get('banned_users', [])
-    
     if not banned:
         await message.reply_text("✅ No banned users.")
         return
-    
     text = "🚫 **Banned Users:**\n\n"
     for user_id in banned:
         text += f"• `{user_id}`\n"
-    
     await message.reply_text(text)
 
-# Check if user is banned
 def is_user_banned(user_id: int) -> bool:
-    """Check if user is banned"""
     return user_id in admin_data.get('banned_users', [])
