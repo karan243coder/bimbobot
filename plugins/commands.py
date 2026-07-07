@@ -1,9 +1,9 @@
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
-from plugins.advanced_progress import AdvancedProgress, active_progress
+from plugins.advanced_progress import AdvancedProgress
 from plugins.download_queue import download_queue
 from plugins.language import get_user_language, set_language, LANGUAGES
-from plugins.user_quota import user_quota_manager
+from plugins.user_quota import quota_manager
 from plugins.premium import premium_manager
 from plugins.video_utils import video_converter, screenshot_generator
 from plugins.torrent_manager import torrent_manager
@@ -62,7 +62,7 @@ async def queue_command(client: Client, message: Message):
 async def quota_command(client: Client, message: Message):
     """Show user quota"""
     user_id = message.from_user.id
-    quota = user_quota_manager.get_user_quota(user_id)
+    quota = quota_manager.get_user_quota(user_id)
     lang = get_user_language(user_id)
     
     if lang == 'hi':
@@ -187,7 +187,7 @@ async def convert_command(client: Client, message: Message):
         return
     
     # Check quota
-    if not user_quota_manager.can_use_feature(user_id, 'video_conversion'):
+    if not quota_manager.can_use_feature(user_id, 'video_conversion'):
         await message.reply_text("⚠️ Daily video conversion limit reached!")
         return
     
@@ -215,7 +215,7 @@ async def convert_command(client: Client, message: Message):
         )
         
         # Update quota
-        user_quota_manager.use_feature(user_id, 'video_conversion')
+        quota_manager.use_feature(user_id, 'video_conversion')
         
         await msg.delete()
     else:
@@ -236,7 +236,7 @@ async def screenshot_command(client: Client, message: Message):
         return
     
     # Check quota
-    if not user_quota_manager.can_use_feature(user_id, 'screenshot'):
+    if not quota_manager.can_use_feature(user_id, 'screenshot'):
         await message.reply_text("⚠️ Daily screenshot limit reached!")
         return
     
@@ -260,7 +260,7 @@ async def screenshot_command(client: Client, message: Message):
         )
         
         # Update quota
-        user_quota_manager.use_feature(user_id, 'screenshot')
+        quota_manager.use_feature(user_id, 'screenshot')
         
         await msg.delete()
     else:
