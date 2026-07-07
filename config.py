@@ -78,3 +78,15 @@ class Config(object):
 # Get from browser: Login to Terabox -> F12 -> Application -> Cookies -> Copy "lang" and "ndus"
 # Format: "lang=en; ndus=YOUR_NDUS_VALUE;"
 BIMBO_TERABOX_COOKIE = os.environ.get("BIMBO_TERABOX_COOKIE", "")
+
+# =============================================================================
+# Module-level aliases so other files can do: from config import VARIABLE_NAME
+# (Some plugin files import these directly instead of via Config class)
+# =============================================================================
+BIMBO_OWNER_ID = Config.BIMBO_OWNER_ID
+BIMBO_DATABASE_URL = Config.BIMBO_DATABASE_URL
+BIMBO_DOWNLOAD_LOCATION = Config.BIMBO_DOWNLOAD_LOCATION
+
+# Watermark & download dir for terabox (were missing entirely)
+BIMBO_WATERMARK_TEXT = os.environ.get("BIMBO_WATERMARK_TEXT", "")
+BIMBO_DOWNLOAD_DIR = os.environ.get("BIMBO_DOWNLOAD_DIR", Config.BIMBO_DOWNLOAD_LOCATION)
