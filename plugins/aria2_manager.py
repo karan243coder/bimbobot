@@ -4,6 +4,7 @@ import time
 import asyncio
 import logging
 from config import Config
+from helper_funcs.display_progress import register_task, update_task, set_user_message, build_advanced_progress_text, get_system_stats_advanced, format_speed, humanbytes
 
 logger = logging.getLogger(__name__)
 
@@ -215,6 +216,13 @@ async def download_with_aria2(url, download_dir, filename=None, progress_callbac
                     speed=speed,
                     status=current_status
                 )
+            
+            # Also register in unified tracker
+            task_id = f"aria2_{gid}"
+            from helper_funcs.display_progress import get_task, _task_store
+            if not get_task(task_id):
+                register_task(task_id, 0, filename or f"aria2_{gid}", total, 'download', 'aria2')
+            update_task(task_id, completed, total, speed, 'downloading' if current_status == 'active' else current_status, 'aria2')
             
             if current_status == 'complete':
                 files = status.get('files', [])
