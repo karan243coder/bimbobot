@@ -173,3 +173,7 @@ def get_language_name(lang_code: str) -> str:
     """Get language name"""
     languages = get_available_languages()
     return languages.get(lang_code, 'Unknown')
+
+# Aliases for backward compatibility (used by plugins/commands.py)
+set_language = set_user_language
+LANGUAGES = get_available_languages()
