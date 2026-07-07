@@ -6,9 +6,9 @@ from config import BIMBO_OWNER_ID
 
 # Premium limits
 FREE_LIMITS = {
-    'daily_downloads': 10,
-    'daily_size': 2 * 1024 * 1024 * 1024,  # 2 GB
-    'max_file_size': 500 * 1024 * 1024,    # 500 MB
+    'daily_downloads': 50,
+    'daily_size': 5 * 1024 * 1024 * 1024,  # 5 GB (5000 MB)
+    'max_file_size': 2 * 1024 * 1024 * 1024,    # 2 GB
     'max_concurrent': 1,
     'queue_priority': 0,
     'torrent_enabled': False,
