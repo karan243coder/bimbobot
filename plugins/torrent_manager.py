@@ -50,6 +50,10 @@ class TorrentManager:
             }
             
             if magnet_uri:
+                # Validate it's actually a magnet link
+                if not magnet_uri.startswith('magnet:'):
+                    logger.error(f"Invalid magnet URI (must start with magnet:): {magnet_uri[:50]}...")
+                    return None
                 params['url'] = magnet_uri
                 logger.info(f"Adding magnet: {magnet_uri[:50]}...")
             elif torrent_file:
@@ -136,15 +140,27 @@ class TorrentManager:
                         torrent_info = handle.torrent_file()
                         files = []
                         for i in range(torrent_info.num_files()):
-                            file_path = os.path.join(
-                                torrent_data['save_path'],
-                                torrent_info.file_path(i)
-                            )
+                            # libtorrent 2.x API - try multiple methods
+                            try:
+                                file_path = os.path.join(
+                                    torrent_data['save_path'],
+                                    torrent_info.files().file_path(i)
+                                )
+                            except AttributeError:
+                                try:
+                                    file_path = os.path.join(
+                                        torrent_data['save_path'],
+                                        torrent_info.file_at(i)
+                                    )
+                                except AttributeError:
+                                    file_path = os.path.join(
+                                        torrent_data['save_path'],
+                                        f"torrent_file_{i}"
+                                    )
                             files.append({
                                 'path': file_path,
                                 'size': torrent_info.file_size(i)
                             })
-                        
                         # Call callback with completion
                         if callback:
                             await callback({
