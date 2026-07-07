@@ -221,10 +221,21 @@ def format_speed(bytes_per_sec):
     return f"{humanbytes(bytes_per_sec)}/s"
 
 
-def format_time(seconds):
-    if seconds is None or seconds < 0:
+def format_time(seconds=None, milliseconds=None):
+    """Unified time formatter - accepts seconds (positional) or milliseconds (keyword)"""
+    # Support: format_time(seconds_value) and TimeFormatter(milliseconds=X)
+    if seconds is not None:
+        ms = seconds * 1000
+    elif milliseconds is not None:
+        ms = milliseconds
+    else:
+        return "0s"
+    
+    if ms is None or ms < 0:
         return "∞"
-    seconds = int(seconds)
+    
+    ms = int(ms)
+    seconds = ms // 1000
     days = seconds // 86400
     hours = (seconds % 86400) // 3600
     minutes = (seconds % 3600) // 60
