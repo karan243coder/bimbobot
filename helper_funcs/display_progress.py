@@ -351,7 +351,7 @@ async def build_advanced_progress_text(user_id):
     
     📥 TASK 1: video.mp4
     ┌─────────────────────────────┐
-    │ [████████░░░░░░] 67.3%      │
+    │ [████████░░░░░░] 67.3%     │
     │ ⚡ Speed : 2.4MB/s         │
     │ 📦 Done  : 156.2MB/256MB   │
     │ ⏱️ ETA   : 42s             │
@@ -361,10 +361,10 @@ async def build_advanced_progress_text(user_id):
     
     📤 TASK 2: file.zip
     ┌─────────────────────────────┐
-    │ [████████████] 100%         │
+    │ [████████████] 100%        │
     │ ⚡ Speed : 5.1MB/s         │
-    │ 📦 Done  : 1.2GB/1.2GB     │
-    │ 🎬 Engine: ⚡Aria2         │
+    │ 📦 Done  : 1.2GB/1.2GB    │
+    │ 🎬 Engine: ⚡Aria2          │
     │ 📊 Status: ✅ Completed    │
     └─────────────────────────────┘
     
@@ -388,8 +388,8 @@ async def build_advanced_progress_text(user_id):
         return None
     
     # ===== HEADER =====
-    text = " ╔════════════════════════════════════╗\n"
-    text += "║        📊 **BIMBO PROGRESS**      ║\n"
+    text = "╔════════════════════════════════════╗\n"
+    text += "║        📊 **BIMBO PROGRESS**        ║\n"
     text += "╚════════════════════════════════════╝\n\n"
     
     # ===== TASKS =====
@@ -578,3 +578,7 @@ def cleanup_all_progress():
     speed_history.clear()
     last_edit_time.clear()
     last_progress_text.clear()
+
+# ===================== LEGACY ALIASES (for backward compatibility) =====================
+# Purane code mein TimeFormatter use hota hai
+TimeFormatter = format_time
