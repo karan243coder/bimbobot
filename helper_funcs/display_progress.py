@@ -306,8 +306,8 @@ def get_system_stats_advanced():
         cpu = psutil.cpu_percent(interval=0.1)
         mem = psutil.virtual_memory()
         disk = psutil.disk_usage('/')
-        boot = time.time() - psutil.boot_time()
-        uptime = format_time(boot)
+        boot_seconds = time.time() - psutil.boot_time()
+        uptime = format_time(seconds=boot_seconds)
         
         # CPU bar
         cpu_bar = "█" * int(cpu/10) + "░" * (10 - int(cpu/10))
@@ -477,8 +477,19 @@ def status_text(task):
     return s.capitalize()
 
 
+_last_progress_update = {}  # user_id -> timestamp
+
 async def update_user_progress(client, user_id):
-    """User ka progress message update karo"""
+    """User ka progress message update karo - with FloodWait protection"""
+    from pyrogram.errors import FloodWait
+    
+    now = time.time()
+    last = _last_progress_update.get(user_id, 0)
+    
+    # Sirf har 3 sec mein update karo (FloodWait se bachne ke liye)
+    if now - last < 3:
+        return
+    
     message = get_user_message(user_id)
     if not message:
         return
@@ -487,14 +498,19 @@ async def update_user_progress(client, user_id):
     if not text:
         try:
             await message.edit_text("✅ **All tasks completed!** 🎉")
+            _task_messages.pop(user_id, None)
         except:
             pass
         return
     
     try:
+        _last_progress_update[user_id] = now
         await message.edit_text(text)
+    except FloodWait as e:
+        logger.warning(f"⏳ FloodWait: {e.value}s - progress update paused")
+        _last_progress_update[user_id] = now + e.value
     except Exception as e:
-        if "MESSAGE_NOT_MODIFIED" not in str(e):
+        if "MESSAGE_NOT_MODIFIED" not in str(e) and "same content" not in str(e).lower():
             logger.error(f"Progress update error: {e}")
 
 
@@ -562,16 +578,20 @@ async def progress_for_pyrogram(current, total, ud_type, message, start,
                "downloading" if is_download else "uploading",
                engine)
     
-    # Update user message
+    # Update user message (only if enough time passed)
     user_id = chat_id
-    if not get_user_message(user_id):
+    if not get_user_message(user_id) and percentage > 0:
         try:
             msg = await message.reply_text("📊 **Starting...**")
             set_user_message(user_id, msg)
         except:
             pass
     
-    await update_user_progress(None, user_id)
+    # Sirf tab update jab percentage badha ho ya complete hua ho
+    _last_update_pct = _last_progress_update.get(f"pct_{user_id}", -1)
+    if abs(percentage - _last_update_pct) >= 2 or current == total or current == 0:
+        await update_user_progress(None, user_id)
+        _last_progress_update[f"pct_{user_id}"] = percentage
     
     # Mark completed
     if current == total:
@@ -579,6 +599,7 @@ async def progress_for_pyrogram(current, total, ud_type, message, start,
         cleanup_progress_state(msg_id)
         
         # Final update
+        await asyncio.sleep(0.5)
         await update_user_progress(None, user_id)
 
 
