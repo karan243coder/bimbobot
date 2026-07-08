@@ -1,0 +1,427 @@
+from pyrogram import Client, filters
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.errors import FloodWait
+from plugins.advanced_progress import AdvancedProgress
+from plugins.download_queue import download_queue
+from plugins.language import get_user_language, set_language, LANGUAGES
+from plugins.user_quota import quota_manager
+from plugins.premium import premium_manager
+from plugins.video_utils import video_converter, screenshot_generator
+from plugins.torrent_manager import torrent_manager
+from plugins.aria2_manager import aria2_manager
+from config import BIMBO_OWNER_ID
+import asyncio
+import os
+import time
+
+
+# ======================= AUTO-DELETE HELPER =======================
+async def auto_delete_messages(user_msg: Message, bot_msg: Message, delay: int = 15):
+    """Auto-delete both user command and bot response after delay"""
+    await asyncio.sleep(delay)
+    try:
+        await user_msg.delete()
+    except Exception as e:
+        pass  # Silent fail - message might already be deleted
+    try:
+        await bot_msg.delete()
+    except Exception as e:
+        pass  # Silent fail - message might already be deleted
+
+
+# ======================= START =======================
+@Client.on_message(filters.command("start"))
+async def start_command(client: Client, message: Message):
+    user = message.from_user
+    bot_msg = await message.reply_text(
+        f"**👋 Hello {user.first_name}!**\n\n"
+        f"Welcome to BIMBO Bot 🚀\n\n"
+        f"Send any link to download!\n"
+        f"Use /help for all commands.",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("📢 Channel", url="https://t.me/Bimbo69"),
+             InlineKeyboardButton("👨‍💻 Owner", url="https://t.me/Bimbo69")]
+        ])
+    )
+    # Auto-delete after 10 seconds
+    asyncio.create_task(auto_delete_messages(message, bot_msg, 10))
+
+
+# ======================= HELP =======================
+@Client.on_message(filters.command("help"))
+async def help_command(client: Client, message: Message):
+    text = (
+        "**📚 BIMBO Bot Commands**\n\n"
+        "**📥 Download:**\n"
+        "• Send any link - Auto download\n"
+        "• /torrent <magnet> - Torrent\n\n"
+        "**⚙️ Utilities:**\n"
+        "• /status - System status\n"
+        "• /queue - Download queue\n"
+        "• /quota - Daily limits\n"
+        "• /language - Change language\n\n"
+        "**⭐ Premium:**\n"
+        "• /premium - Premium info\n\n"
+        "**🎬 Media:**\n"
+        "• /convert - Convert video\n"
+        "• /screenshot - Screenshot\n\n"
+        "**🛠️ Admin:**\n"
+        "• /admin - Admin panel\n"
+        "• /addpremium - Add premium user\n"
+        "• /removepremium - Remove premium\n"
+        "• /premiumlist - Premium list\n"
+        "• /ban, /unban, /banlist\n\n"
+        "**Powered by @Bimbo69**"
+    )
+    bot_msg = await message.reply_text(text)
+    # Auto-delete after 10 seconds
+    asyncio.create_task(auto_delete_messages(message, bot_msg, 10))
+
+
+# ======================= LANGUAGE =======================
+@Client.on_message(filters.command("language"))
+async def language_command(client: Client, message: Message):
+    keyboard = []
+    for lang_code, lang_name in LANGUAGES.items():
+        keyboard.append([InlineKeyboardButton(f"{lang_name}", callback_data=f"set_lang_{lang_code}")])
+    keyboard.append([InlineKeyboardButton("❌ Close", callback_data="close")])
+    bot_msg = await message.reply_text(
+        "🌐 **Select Language / भाषा चुनें**\n\nChoose your preferred language:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+    # Auto-delete after 10 seconds
+    asyncio.create_task(auto_delete_messages(message, bot_msg, 10))
+
+
+# ======================= QUEUE =======================
+@Client.on_message(filters.command("queue"))
+async def queue_command(client: Client, message: Message):
+    stats = download_queue.get_stats()
+    
+    text = (
+        f"📋 **Download Queue**\n\n"
+        f"⏳ **Queued:** {stats['queued']}\n"
+        f"⬇️ **Active:** {stats['active']}\n"
+        f"✅ **Completed:** {stats['completed']}\n\n"
+    )
+    
+    if download_queue.active:
+        text += "**Active Downloads:**\n\n"
+        i = 1
+        for task_id, task in list(download_queue.active.items())[:5]:
+            fname = getattr(task, 'filename', None) or getattr(task, 'url', 'Unknown')[:35]
+            prog = getattr(task, 'progress', 0)
+            spd = getattr(task, 'speed', 0)
+            status = getattr(task, 'status', 'active')
+            text += f"{i}. **{fname}**\n"
+            text += f"   📊 {prog:.1f}% | ⚡ {spd/1024/1024:.2f} MB/s | {status}\n\n"
+            i += 1
+    else:
+        text += "ℹ️ No active downloads.\n"
+        text += "Send a link to start downloading!\n"
+    
+    if download_queue.queue:
+        text += f"💡 {len(download_queue.queue)} tasks waiting in queue...\n"
+    
+    bot_msg = await message.reply_text(text)
+    # Auto-delete after 10 seconds
+    asyncio.create_task(auto_delete_messages(message, bot_msg, 10))
+
+
+# ======================= QUOTA =======================
+@Client.on_message(filters.command("quota"))
+async def quota_command(client: Client, message: Message):
+    user_id = message.from_user.id
+    from plugins.premium import get_user_limits
+    
+    quota = quota_manager.get_user_quota(user_id)
+    limits = get_user_limits(user_id)
+    
+    # Calculate remaining
+    remaining_downloads = limits['daily_downloads'] - quota.get('daily_downloads', 0)
+    if limits['daily_downloads'] == -1:
+        remaining_downloads_str = "Unlimited"
+        dl_limit_str = "∞"
+    else:
+        remaining_downloads_str = str(remaining_downloads)
+        dl_limit_str = str(limits['daily_downloads'])
+    
+    daily_size_mb = limits['daily_size'] / (1024 * 1024) if limits['daily_size'] > 0 else float('inf')
+    used_mb = quota.get('daily_size', 0) / (1024 * 1024)
+    remaining_mb = max(0, daily_size_mb - used_mb)
+    
+    if limits['daily_size'] == -1:
+        size_limit_str = "∞"
+        remaining_size_str = "∞"
+    else:
+        size_limit_str = f"{daily_size_mb:.0f} MB"
+        remaining_size_str = f"{remaining_mb:.0f} MB"
+    
+    # User type
+    if user_id == BIMBO_OWNER_ID:
+        user_type = "👑 Owner"
+    elif premium_manager.is_premium(user_id):
+        user_type = "⭐ Premium"
+    else:
+        user_type = "👤 Free User"
+    
+    text = (
+        f"📊 **Daily Quota**\n\n"
+        f"{user_type}\n\n"
+        f"📥 **Downloads:**\n"
+        f"├ Used: {quota.get('daily_downloads', 0)} / {dl_limit_str}\n"
+        f"└ Remaining: {remaining_downloads_str}\n\n"
+        f"💾 **Data:**\n"
+        f"├ Used: {used_mb:.2f} MB / {size_limit_str}\n"
+        f"└ Remaining: {remaining_size_str}\n"
+    )
+    bot_msg = await message.reply_text(text)
+    # Auto-delete after 10 seconds
+    asyncio.create_task(auto_delete_messages(message, bot_msg, 10))
+
+
+# ======================= PREMIUM =======================
+@Client.on_message(filters.command("premium"))
+async def premium_command(client: Client, message: Message):
+    user_id = message.from_user.id
+    if user_id == BIMBO_OWNER_ID:
+        text = "👑 **Owner Account**\n\n✅ Aapko saari features unlimited milengi!\n✓ Unlimited downloads\n✓ Video convert\n✓ Screenshot\n✓ Torrent\n✓ Everything unlocked!"
+    elif premium_manager.is_premium(user_id):
+        info = premium_manager.get_premium_info(user_id)
+        text = f"⭐ **Premium Active!**\n\n👑 Status: ✅ Active\n📅 Expires: {info.get('expiry', 'N/A')}\n\n✓ Unlimited downloads\n✓ Video convert\n✓ Screenshot\n✓ Torrent"
+    else:
+        text = "⭐ **Upgrade to Premium**\n\nEnjoy unlimited features!\nContact: @Bimbo69"
+    bot_msg = await message.reply_text(text)
+    # Auto-delete after 10 seconds
+    asyncio.create_task(auto_delete_messages(message, bot_msg, 10))
+
+
+# ======================= STATUS =======================
+@Client.on_message(filters.command("status"))
+async def status_command(client: Client, message: Message):
+    msg = await message.reply_text("📊 Fetching system status...")
+    stats = download_queue.get_stats()
+    try:
+        torrents = await torrent_manager.get_all_torrents()
+        t_count = len(torrents)
+    except:
+        t_count = 0
+    import psutil, platform
+    cpu = psutil.cpu_percent(interval=0.5)
+    mem = psutil.virtual_memory()
+    disk = psutil.disk_usage('/')
+    boot = time.time() - psutil.boot_time()
+    boot_str = f"{int(boot//3600)}h {int((boot%3600)//60)}m"
+    text = (
+        f"📊 **System Status**\n\n"
+        f"🖥️ OS: {platform.system()} | Uptime: {boot_str}\n"
+        f"📈 CPU: {cpu:.1f}% | RAM: {mem.used/1024**3:.1f}/{mem.total/1024**3:.1f}GB ({mem.percent}%)\n"
+        f"💾 Disk: {disk.used/1024**3:.1f}/{disk.total/1024**3:.1f}GB ({disk.percent}%)\n\n"
+        f"📊 Active: {stats['active']} | Queued: {stats['queued']} | Torrents: {t_count}\n"
+        f"└ Status: ✅ Online"
+    )
+    await msg.edit_text(text)
+    # Auto-delete after 10 seconds
+    asyncio.create_task(auto_delete_messages(message, msg, 10))
+
+
+# ======================= CONVERT =======================
+@Client.on_message(filters.command("convert"))
+async def convert_command(client: Client, message: Message):
+    if not message.reply_to_message or not message.reply_to_message.video:
+        bot_msg = await message.reply_text("⚠️ Reply to a video with /convert")
+        asyncio.create_task(auto_delete_messages(message, bot_msg, 15))
+        return
+    user_id = message.from_user.id
+    if user_id != BIMBO_OWNER_ID and not premium_manager.is_premium(user_id):
+        bot_msg = await message.reply_text("⭐ Premium feature! Use /premium")
+        asyncio.create_task(auto_delete_messages(message, bot_msg, 15))
+        return
+    
+    # Delete user command immediately
+    await message.delete()
+    
+    video = message.reply_to_message.video
+    m = await message.reply_text("⬇️ Downloading video...")
+    try:
+        fp = await client.download_media(video.file_id)
+        await m.edit_text("🔄 Converting...")
+        out = await video_converter.convert_video(fp, output_format="mp4", quality="medium")
+        if out:
+            await m.edit_text("⬆️ Uploading...")
+            # Send converted video - THIS WILL STAY
+            await client.send_document(message.chat.id, out, caption="✅ Converted!")
+            # Delete only the status message, NOT the media
+            await m.delete()
+        else:
+            await m.edit_text("❌ Conversion failed!")
+            asyncio.create_task(m.delete())
+            await asyncio.sleep(15)
+    except Exception as e:
+        await m.edit_text(f"❌ Error: {e}")
+        asyncio.create_task(m.delete())
+        await asyncio.sleep(15)
+
+
+# ======================= SCREENSHOT =======================
+@Client.on_message(filters.command("screenshot"))
+async def screenshot_command(client: Client, message: Message):
+    if not message.reply_to_message or not message.reply_to_message.video:
+        bot_msg = await message.reply_text("⚠️ Reply to a video with /screenshot [count]")
+        asyncio.create_task(auto_delete_messages(message, bot_msg, 10))
+        return
+    user_id = message.from_user.id
+    if user_id != BIMBO_OWNER_ID and not premium_manager.is_premium(user_id):
+        bot_msg = await message.reply_text("⭐ Premium feature! Use /premium")
+        asyncio.create_task(auto_delete_messages(message, bot_msg, 10))
+        return
+
+    # Check if count specified
+    count = 1
+    if len(message.command) > 1:
+        try:
+            count = int(message.command[1])
+            if count < 1:
+                count = 1
+            if count > 10:
+                count = 10
+                await message.reply_text("⚠️ Max 10 screenshots allowed. Generating 10...")
+        except ValueError:
+            bot_msg = await message.reply_text("⚠️ Invalid number! Usage: /screenshot [count]")
+            asyncio.create_task(auto_delete_messages(message, bot_msg, 10))
+            return
+
+    video = message.reply_to_message.video
+    m = await message.reply_text(f"⬇️ Downloading video...")
+    try:
+        fp = await client.download_media(video.file_id)
+
+        if count == 1:
+            await m.edit_text("📸 Generating screenshot...")
+            ss = await screenshot_generator.generate_screenshot(fp)
+            if ss:
+                await m.edit_text("⬆️ Uploading...")
+                await client.send_photo(message.chat.id, ss, caption="✅ Screenshot!")
+                await m.delete()
+                await message.delete()
+            else:
+                await m.edit_text("❌ Failed to generate screenshot!")
+                asyncio.create_task(auto_delete_messages(message, m, 10))
+        else:
+            await m.edit_text(f"📸 Generating {count} screenshots...")
+            screenshots = await screenshot_generator.generate_multiple_screenshots(fp, count=count)
+            if screenshots:
+                await m.edit_text(f"⬆️ Uploading {len(screenshots)} screenshots...")
+                # Send as media group (album)
+                from pyrogram.types import InputMediaPhoto
+                media_group = []
+                for i, ss in enumerate(screenshots):
+                    caption_text = f"📸 Screenshot {i+1}/{len(screenshots)}" if i == 0 else ""
+                    media_group.append(InputMediaPhoto(ss, caption=caption_text))
+
+                await client.send_media_group(message.chat.id, media_group)
+                await m.delete()
+                await message.delete()
+            else:
+                await m.edit_text("❌ Failed to generate screenshots!")
+                asyncio.create_task(auto_delete_messages(message, m, 10))
+    except Exception as e:
+        await m.edit_text(f"❌ Error: {e}")
+        asyncio.create_task(auto_delete_messages(message, m, 10))
+
+
+# ======================= TORRENT =======================
+@Client.on_message(filters.command("torrent"))
+async def torrent_command(client: Client, message: Message):
+    if len(message.command) < 2:
+        bot_msg = await message.reply_text("⚠️ Usage: /torrent <magnet_link>")
+        asyncio.create_task(auto_delete_messages(message, bot_msg, 10))
+        return
+    user_id = message.from_user.id
+    if user_id != BIMBO_OWNER_ID and not premium_manager.is_premium(user_id):
+        bot_msg = await message.reply_text("⭐ Premium feature! Use /premium")
+        asyncio.create_task(auto_delete_messages(message, bot_msg, 10))
+        return
+    magnet = message.command[1]
+    m = await message.reply_text("🔄 Adding torrent...")
+    async def progress(data):
+        try:
+            if data.get('is_finished'):
+                await m.edit_text(f"✅ Torrent done!\n{data.get('name', '')}")
+            else:
+                txt = f"⬇️ **{data.get('name', 'Loading...')}**\n\nProgress: {data.get('progress', 0):.1f}%\n⬇️ {data.get('download_rate',0)/1024**2:.2f} MB/s\n⬆️ {data.get('upload_rate',0)/1024**2:.2f} MB/s\nPeers: {data.get('num_peers',0)} | Seeds: {data.get('num_seeds',0)}\nState: {data.get('state','Unknown')}"
+                await m.edit_text(txt)
+        except FloodWait as e:
+            await asyncio.sleep(e.value)
+    try:
+        info_hash = await torrent_manager.add_torrent(magnet_uri=magnet, progress_callback=progress)
+        if info_hash:
+            await m.edit_text(f"✅ Torrent added! Hash: `{info_hash}`")
+            # Don't auto-delete torrent progress messages
+        else:
+            await m.edit_text("❌ Failed!")
+            asyncio.create_task(auto_delete_messages(message, m, 10))
+    except Exception as e:
+        await m.edit_text(f"❌ Error: {e}")
+        asyncio.create_task(auto_delete_messages(message, m, 10))
+
+
+# ======================= ADD PREMIUM (ADMIN) =======================
+@Client.on_message(filters.command("addpremium") & filters.user(BIMBO_OWNER_ID))
+async def add_premium_command(client: Client, message: Message):
+    if len(message.command) < 2:
+        await message.reply_text("❌ Usage: `/addpremium <user_id> [days]`\nExample: `/addpremium 123456789 30`")
+        return
+    try:
+        user_id = int(message.command[1])
+        days = int(message.command[2]) if len(message.command) > 2 else 30
+        premium_manager.add_premium_user(user_id, days=days)
+        await message.reply_text(f"✅ **Premium Added!**\n\n👤 User: `{user_id}`\n📅 Days: {days}")
+    except Exception as e:
+        await message.reply_text(f"❌ Error: {e}")
+
+
+# ======================= REMOVE PREMIUM (ADMIN) =======================
+@Client.on_message(filters.command("removepremium") & filters.user(BIMBO_OWNER_ID))
+async def remove_premium_command(client: Client, message: Message):
+    if len(message.command) < 2:
+        await message.reply_text("❌ Usage: `/removepremium <user_id>`\nExample: `/removepremium 123456789`")
+        return
+    try:
+        user_id = int(message.command[1])
+        premium_manager.remove_premium_user(user_id)
+        await message.reply_text(f"✅ Premium removed for user `{user_id}`!")
+    except Exception as e:
+        await message.reply_text(f"❌ Error: {e}")
+
+
+# ======================= PREMIUM LIST (ADMIN) =======================
+@Client.on_message(filters.command("premiumlist") & filters.user(BIMBO_OWNER_ID))
+async def premium_list_command(client: Client, message: Message):
+    users = premium_manager.get_all_premium_users()
+    if not users:
+        await message.reply_text("📋 No premium users found.")
+        return
+    text = "⭐ **Premium Users**\n\n"
+    for uid, data in users.items():
+        text += f"👤 `{uid}` | {data.get('tier','premium')} | Exp: {data.get('expiry','Lifetime')}\n"
+    if len(text) > 4000:
+        text = text[:4000] + "\n\n...truncated"
+    await message.reply_text(text)
+
+# ======================= CALLBACK HANDLERS (for language & close buttons) =======================
+@Client.on_callback_query(filters.regex(r"^set_lang_"))
+async def language_callback(client: Client, callback_query):
+    lang_code = callback_query.data.replace("set_lang_", "")
+    user_id = callback_query.from_user.id
+    if lang_code in LANGUAGES:
+        set_language(user_id, lang_code)
+        await callback_query.answer(f"✅ Language changed to {LANGUAGES[lang_code]}!", show_alert=True)
+        await callback_query.message.edit_text(f"✅ **Language set to {LANGUAGES[lang_code]}**")
+    else:
+        await callback_query.answer("❌ Invalid language!", show_alert=True)
+
+@Client.on_callback_query(filters.regex(r"^close$"))
+async def close_callback(client: Client, callback_query):
+    await callback_query.message.delete()
+    await callback_query.answer("Closed!")
