@@ -1,6 +1,7 @@
 import os
 import asyncio
 import logging
+import time
 from typing import Optional, Dict
 import libtorrent as lt
 from helper_funcs.display_progress import register_task, update_task, set_user_message, update_user_progress
