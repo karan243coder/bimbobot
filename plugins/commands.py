@@ -43,7 +43,7 @@ async def start_command(client: Client, message: Message):
         f"Send any link to download!\n"
         f"Use /help for all commands.",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("📢 Channel", url="https://t.me/Bimbo69"),
+            [InlineKeyboardButton("📢 Channel", url="https://t.me/Bimbobot69"),
              InlineKeyboardButton("👨‍💻 Owner", url="https://t.me/Bimbo69")]
         ])
     )
