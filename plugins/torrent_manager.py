@@ -201,8 +201,11 @@ class TorrentManager:
             except Exception as e:
                 logger.error(f"Failed to resume torrent: {e}")
             
-            # Start monitoring in background
-            asyncio.create_task(self._monitor_torrent(info_hash, user_id))
+            # Start monitoring in background and store the task
+            monitor_task = asyncio.create_task(self._monitor_torrent(info_hash, user_id))
+            
+            # Store the monitor task so we can cancel it later
+            self.active_torrents[info_hash]['monitor_task'] = monitor_task
             
             return info_hash
         
@@ -384,22 +387,57 @@ class TorrentManager:
         return False
     
     async def remove_torrent(self, info_hash: str, delete_files: bool = False) -> bool:
-        """Remove torrent"""
+        """Remove torrent and stop the task completely"""
         if info_hash in self.active_torrents:
             try:
-                handle = self.active_torrents[info_hash]['handle']
+                torrent_data = self.active_torrents[info_hash]
+                handle = torrent_data['handle']
+                monitor_task = torrent_data.get('monitor_task')
                 
-                # Remove from session
-                self.session.remove_torrent(handle, 
-                    lt.session.delete_files if delete_files else 0)
+                # Step 1: Cancel the monitoring task first
+                if monitor_task and not monitor_task.done():
+                    monitor_task.cancel()
+                    try:
+                        await monitor_task
+                    except asyncio.CancelledError:
+                        logger.info(f"Monitor task cancelled: {info_hash}")
+                    except Exception as e:
+                        logger.warning(f"Error cancelling monitor task: {e}")
                 
-                # Remove from active torrents
+                # Step 2: Pause the torrent
+                try:
+                    handle.pause()
+                    logger.info(f"Torrent paused: {info_hash}")
+                except Exception as e:
+                    logger.warning(f"Could not pause torrent: {e}")
+                
+                # Step 3: Wait a bit for pause to take effect
+                await asyncio.sleep(1)
+                
+                # Step 4: Remove from session with delete_files flag
+                try:
+                    if delete_files:
+                        self.session.remove_torrent(handle, lt.session.delete_files)
+                        logger.info(f"Torrent removed from session with files: {info_hash}")
+                    else:
+                        self.session.remove_torrent(handle)
+                        logger.info(f"Torrent removed from session: {info_hash}")
+                except Exception as e:
+                    logger.warning(f"Could not remove from session: {e}")
+                
+                # Step 5: Remove from active torrents
                 del self.active_torrents[info_hash]
+                logger.info(f"Torrent removed from active_torrents: {info_hash}")
                 
-                logger.info(f"Torrent removed: {info_hash}")
+                # Step 6: Wait for everything to clean up
+                await asyncio.sleep(2)
+                
+                logger.info(f"Torrent completely stopped and removed: {info_hash}")
                 return True
             except Exception as e:
-                logger.error(f"Remove torrent error: {e}")
+                logger.error(f"Remove torrent error: {e}", exc_info=True)
+        else:
+            logger.warning(f"Torrent not found in active_torrents: {info_hash}")
         return False
     
     async def get_torrent_status(self, info_hash: str) -> Optional[Dict]:
